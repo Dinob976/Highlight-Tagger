@@ -1,6 +1,6 @@
 // Highlight-Tagger – Offline-Speicher
 // Beim Ändern der App diese Nummer erhöhen, dann holt sich das iPhone die neue Version.
-const CACHE = "highlight-tagger-v1";
+const CACHE = "highlight-tagger-v2";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 const FONT_CSS = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@500;600;700&display=swap";
 
