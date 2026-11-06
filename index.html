@@ -118,6 +118,21 @@ button:disabled{opacity:.3;cursor:not-allowed}
 .hlseg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .hlseg .opt{font-size:17px;padding:12px 4px}
 .wrap>.wrap{margin:0}
+.arch{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.arow{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;border-top:1px solid var(--line);cursor:pointer;background:var(--paper);color:var(--ink);width:100%;text-align:left;border-radius:0;font:inherit}
+.arow:first-child{border-top:0}
+.arow .ad{font-family:var(--display);font-weight:800;font-size:18px;line-height:1.05;font-variant-numeric:tabular-nums}
+.arow .ad small{display:block;font-family:var(--body);font-size:12px;font-weight:600;color:var(--muted)}
+.arow .at{min-width:0;font-weight:700;font-size:16px;line-height:1.25}
+.arow .at em{display:block;font-style:normal;font-weight:600;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.arow .as{font-family:var(--display);font-weight:800;font-size:22px}
+.arow.open{background:var(--soft)}
+.adet{background:var(--soft);padding:2px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.adet pre{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:320px;overflow:auto;user-select:text;-webkit-user-select:text}
+.abtns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.abtns button{padding:11px 6px;border-radius:10px;font-weight:700;font-size:15px;background:var(--paper);color:var(--ink);border:2px solid var(--line)}
+.abtns button.pri{background:var(--ok);border-color:var(--ok);color:#fff}
+.abtns button.danger{background:var(--rec);border-color:var(--rec);color:#fff}
 .choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;min-width:0}
 .choices button{font-family:var(--display);font-weight:800;font-size:17px;text-transform:uppercase;letter-spacing:.02em;line-height:1.05;padding:10px 4px;border-radius:14px;background:var(--btn);color:var(--btn-fg);box-shadow:inset 0 -4px 0 rgba(0,0,0,.3);min-width:0}
 .choices button.end{background:var(--paper);color:var(--ink);border:2px solid var(--line);box-shadow:none}
@@ -267,6 +282,10 @@ h1{font-family:var(--display);font-weight:800;font-size:28px;line-height:1;margi
       </ul>
     </div>
     <button class="btn go" id="btnStart">Spiel anlegen</button>
+    <div class="arch" id="arch" hidden>
+      <div class="sect">Letzte Spiele <span id="archCnt"></span></div>
+      <div class="list" id="archList"></div>
+    </div>
     <p class="note" id="installHint">In Safari auf „Teilen“ und dann „Zum Home-Bildschirm“ tippen, dann startet der Tagger wie eine App. Die Daten bleiben auf deinem iPhone.</p>
   </section>
 
@@ -306,6 +325,7 @@ h1{font-family:var(--display);font-weight:800;font-size:28px;line-height:1;margi
     <div class="list" id="log"></div>
 
     <div class="actions">
+      <button class="btn copy" id="btnShare" hidden>Liste teilen</button>
       <button class="btn copy" id="btnCopy">Liste kopieren</button>
       <button class="btn ghost" id="btnUndo"></button>
       <textarea id="fallback" readonly hidden aria-label="Liste zum manuellen Kopieren"></textarea>
@@ -431,7 +451,7 @@ function renderScore(){
 }
 
 function render(){
-  if(!S){$("top").hidden=false;$("setup").hidden=false;$("live").hidden=true;preview();buildSwatches();buildHL();applyColors(selH,selA);return}
+  if(!S){$("top").hidden=false;$("setup").hidden=false;$("live").hidden=true;preview();buildSwatches();buildHL();applyColors(selH,selA);renderArch();return}
   applyColors(S.hc||"blau",S.ac||"orange");
   $("setup").hidden=true;$("live").hidden=false;
   $("mHome").textContent=S.home;$("mAway").textContent=S.away;
@@ -647,6 +667,58 @@ function exportText(){
   return lines.join("\n").trim();
 }
 
+// ---------- Teilen ----------
+function copyText(txt,onFail){
+  const ok=()=>toast("Kopiert – jetzt einfügen");
+  try{navigator.clipboard.writeText(txt).then(ok,()=>onFail?onFail():toast("Kopieren ging nicht – Text lange drücken",true))}catch(e){onFail?onFail():toast("Kopieren ging nicht – Text lange drücken",true)}
+}
+function shareText(txt,title){
+  if(navigator.share){
+    navigator.share({title:title,text:txt}).catch(e=>{if(e&&e.name==="AbortError")return;copyText(txt)});
+  }else copyText(txt);
+}
+function shareList(){shareText(exportText(),S.home+" – "+S.away)}
+
+// ---------- Archiv ----------
+const ARCHKEY="dl-highlight-tagger-archiv";
+function loadArch(){try{return JSON.parse(localStorage.getItem(ARCHKEY)||"[]")}catch(e){return []}}
+function saveArch(a){try{localStorage.setItem(ARCHKEY,JSON.stringify(a.slice(0,50)))}catch(e){}}
+function withGame(G,fn){const old=S;S=G;norm();try{return fn()}finally{S=old}}
+function archiveCurrent(){
+  if(!S||(!S.events.length&&S.phase===0))return;
+  const a=loadArch().filter(g=>g.date!==S.date);a.unshift(JSON.parse(JSON.stringify(S)));saveArch(a);
+}
+let archOpen=null,archDel=null,archDelT=null;
+function renderArch(){
+  const a=loadArch(),box=$("arch"),L=$("archList");
+  box.hidden=!a.length;L.textContent="";if(!a.length)return;
+  $("archCnt").textContent=a.length+(a.length===1?" Spiel":" Spiele");
+  a.forEach(g=>{
+    const d=new Date(g.date),txt=withGame(g,exportText),end=withGame(g,endText);
+    const r=document.createElement("button");r.type="button";r.className="arow"+(archOpen===g.date?" open":"");r.id="arch-"+g.date;
+    const ad=document.createElement("div");ad.className="ad";ad.textContent=pad(d.getDate())+"."+pad(d.getMonth()+1)+".";
+    const ys=document.createElement("small");ys.textContent=d.getFullYear();ad.appendChild(ys);
+    const at=document.createElement("div");at.className="at";at.textContent=g.home+" – "+g.away;
+    const em=document.createElement("em");em.textContent=end+" · "+g.events.length+(g.events.length===1?" Szene":" Szenen");at.appendChild(em);
+    const as=document.createElement("div");as.className="as";as.textContent=archOpen===g.date?"–":"›";
+    r.append(ad,at,as);r.addEventListener("click",()=>{archOpen=archOpen===g.date?null:g.date;archDel=null;renderArch()});
+    L.appendChild(r);
+    if(archOpen===g.date){
+      const det=document.createElement("div");det.className="adet";
+      const pre=document.createElement("pre");pre.textContent=txt;
+      const bt=document.createElement("div");bt.className="abtns";
+      const b1=document.createElement("button");b1.className="pri";b1.textContent=navigator.share?"Teilen":"Kopieren";b1.addEventListener("click",()=>shareText(txt,g.home+" – "+g.away));
+      const b2=document.createElement("button");b2.textContent="Kopieren";b2.addEventListener("click",()=>copyText(txt));
+      const b3=document.createElement("button");b3.className=archDel===g.date?"danger":"";b3.textContent=archDel===g.date?"Wirklich?":"Löschen";
+      b3.addEventListener("click",()=>{
+        if(archDel===g.date){saveArch(loadArch().filter(x=>x.date!==g.date));archDel=null;archOpen=null;haptic();toast("Gelöscht");renderArch();return}
+        archDel=g.date;clearTimeout(archDelT);archDelT=setTimeout(()=>{archDel=null;renderArch()},3000);renderArch();
+      });
+      bt.append(b1,b2,b3);det.append(pre,bt);L.appendChild(det);
+    }
+  });
+}
+
 function copyList(){
   const txt=exportText(),fb=$("fallback");
   const done=()=>{toast("Kopiert – jetzt einfügen");fb.hidden=true};
@@ -657,8 +729,9 @@ function copyList(){
 let pendingNew=false,newTimer=null;
 function newGame(){
   const b=$("btnNew");
-  if(!pendingNew){pendingNew=true;b.classList.add("confirm");b.textContent="Nochmal tippen – Liste wird gelöscht";clearTimeout(newTimer);newTimer=setTimeout(()=>{pendingNew=false;b.classList.remove("confirm");b.textContent="Neues Spiel"},3000);return}
+  if(!pendingNew){pendingNew=true;b.classList.add("confirm");b.textContent="Nochmal tippen – Spiel kommt ins Archiv";clearTimeout(newTimer);newTimer=setTimeout(()=>{pendingNew=false;b.classList.remove("confirm");b.textContent="Neues Spiel"},3000);return}
   clearTimeout(newTimer);pendingNew=false;b.classList.remove("confirm");b.textContent="Neues Spiel";
+  archiveCurrent();
   const h=S.home,a=S.away;selH=S.hc||selH;selA=S.ac||selA;S=null;lastScore=null;try{localStorage.removeItem(KEY)}catch(e){}
   $("inHome").value=h;$("inAway").value=a;render();
 }
@@ -716,6 +789,8 @@ $("inHome").addEventListener("input",preview);$("inAway").addEventListener("inpu
 $("btnStep").addEventListener("click",step);
 $("btnUndo").addEventListener("click",undo);
 $("btnCopy").addEventListener("click",copyList);
+$("btnShare").addEventListener("click",shareList);
+if(navigator.share){$("btnShare").hidden=false;$("btnCopy").className="btn ghost";}
 $("btnNew").addEventListener("click",newGame);
 
 applyMode(getMode());buildGrid();render();setInterval(tick,500);
